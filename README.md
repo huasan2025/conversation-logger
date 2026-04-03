@@ -33,6 +33,53 @@ flowchart TD
 
 ---
 
+## 触发机制与能力边界
+
+### Skill 和 Hook 是两个不同的东西
+
+| 组件 | 职责 | 触发方式 |
+|---|---|---|
+| **`/conversation-logger` Skill** | 一次性安装向导，把 Hook 写入 settings.json | 手动调用一次 |
+| **settings.json 中的 Hook** | 真正的自动记录引擎 | 每次会话自动触发，无需任何操作 |
+
+Skill 本身不做记录。它的唯一作用是帮你完成安装。安装完成后，Skill 就不再需要了。
+
+### 安装一次，永久生效
+
+Hook 写入 `settings.json` 后持久保存。之后每次启动 Claude Code——无论是重新登录、重启终端、还是切换项目——三个 Hook 都会自动运行，无需手动调用任何命令。
+
+### 三个 Hook 各司其职
+
+| Hook | 触发时机 | 做什么 |
+|---|---|---|
+| `SessionStart` | 每次 Claude Code 启动时触发一次 | 在输出目录创建新的 `.md` 文件，写入 frontmatter |
+| `UserPromptSubmit` | 每次你发送消息前触发 | 将你的消息追加写入文件 |
+| `Stop` | 每次 Claude 完成一轮回复后触发 | 将 Claude 的回复和工具摘要追加写入文件 |
+
+`SessionStart` 是关键起点——它负责创建文件和初始化会话状态。如果它没有触发（比如 Hook 尚未安装），当次会话不会被实时记录。
+
+### 如果忘了安装，能补救吗？
+
+**可以。** 任何历史会话都可以事后用 `replay` 命令转换，没有时间限制。Claude Code 会将每次会话的完整记录保存在 `~/.claude/projects/` 下，`replay` 直接读取这些文件生成 Markdown。
+
+```bash
+python3 ~/.claude/scripts/conversation-logger/logger.py replay \
+  ~/.claude/projects/<项目目录>/<会话uuid>.jsonl \
+  ~/Documents/Conversations/补救的会话.md
+```
+
+### 能力边界汇总
+
+| 场景 | 结果 |
+|---|---|
+| Hook 已安装，开启新会话 | ✅ 自动记录，无需任何操作 |
+| Hook 已安装，中途重启 Claude Code | ✅ 新会话自动创建新文件继续记录 |
+| Hook 未安装，想补录已结束的会话 | ✅ 用 `replay` 事后转换 |
+| Hook 在当前会话进行中途安装 | ⚠️ 当前会话不受影响，**下次启动**才生效 |
+| 会话从未产生 transcript 文件 | ❌ 无法恢复（极少见，正常会话都有记录） |
+
+---
+
 ## 会增加 Token 消耗吗？
 
 **不会。零消耗。**

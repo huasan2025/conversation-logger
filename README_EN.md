@@ -33,6 +33,53 @@ The conversation record — the actual back-and-forth with Claude — is the mos
 
 ---
 
+## How it triggers — and what it can't do
+
+### The Skill and the Hooks are two different things
+
+| Component | Role | How it runs |
+|---|---|---|
+| **`/conversation-logger` Skill** | One-time installation guide — writes hooks into settings.json | Run manually once |
+| **Hooks in settings.json** | The actual automatic logging engine | Fires automatically every session |
+
+The Skill itself does no logging. Its only job is to install the hooks. Once installed, you never need to invoke the Skill again.
+
+### Install once, works forever
+
+Hooks persist in `settings.json`. Every time you start Claude Code — new login, terminal restart, different project — all three hooks fire automatically. No commands to run, nothing to remember.
+
+### What each hook does
+
+| Hook | Fires when | Action |
+|---|---|---|
+| `SessionStart` | Once at the start of every Claude Code session | Creates a new `.md` file with frontmatter |
+| `UserPromptSubmit` | Before each message you send | Appends your message to the file |
+| `Stop` | After each Claude reply completes | Appends Claude's reply and tool summaries |
+
+`SessionStart` is the critical entry point — it creates the file and initializes session state. If it didn't fire (because hooks weren't installed yet), that session won't be logged in real-time.
+
+### What if you forgot to install before a session?
+
+**You can recover it.** Any past session can be converted with the `replay` command, at any time. Claude Code keeps a full transcript of every session under `~/.claude/projects/`, and `replay` reads these directly.
+
+```bash
+python3 ~/.claude/scripts/conversation-logger/logger.py replay \
+  ~/.claude/projects/<project-dir>/<session-uuid>.jsonl \
+  ~/Documents/Conversations/recovered-session.md
+```
+
+### Capability boundaries
+
+| Scenario | Result |
+|---|---|
+| Hooks installed, starting a new session | ✅ Logged automatically, no action needed |
+| Hooks installed, restarting Claude Code mid-work | ✅ New session creates a new file automatically |
+| Hooks not installed, past session already ended | ✅ Use `replay` to convert retroactively |
+| Installing hooks while a session is in progress | ⚠️ Current session unaffected — takes effect **next launch** |
+| Session that never produced a transcript file | ❌ Cannot recover (extremely rare — normal sessions always have one) |
+
+---
+
 ## Does this cost extra tokens?
 
 **No. Zero.**
