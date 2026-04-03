@@ -214,28 +214,42 @@ def handle_user_prompt(data: dict) -> None:
 def handle_stop(data: dict) -> None:
     session_id = data.get("session_id", "unknown")
     transcript_path = data.get("transcript_path", "")
-    # Stop hook provides the full assistant reply text directly
-    last_msg = data.get("last_assistant_message", "")
-
-    if not last_msg.strip():
-        return
+    # last_assistant_message only contains text after the final tool call.
+    # When the assistant writes text before tool calls, that text is lost.
+    # Prefer extracting full text from the transcript; fall back to last_assistant_message.
+    last_msg_fallback = data.get("last_assistant_message", "")
 
     state = _read_state(session_id)
     if not state:
         return
 
-    # Collect tool summaries from all new assistant turns since last logged
+    full_text = ""
     tool_summaries = []
+
     if transcript_path and os.path.exists(transcript_path):
         turns = parse_transcript(transcript_path)
-        assistant_turns = [s for r, t, s in turns if r == "assistant"]
+        assistant_turns = [(t, s) for r, t, s in turns if r == "assistant"]
         logged = state["logged_assistant_turns"]
-        for tools in assistant_turns[logged:]:
+        new_turns = assistant_turns[logged:]
+
+        # Concatenate text from all new assistant turns (skip empty ones)
+        texts = [t for t, _ in new_turns if t.strip()]
+        full_text = "\n\n".join(texts)
+
+        for _, tools in new_turns:
             tool_summaries.extend(tools)
+
         state["logged_assistant_turns"] = len(assistant_turns)
 
+    # Fall back to last_assistant_message if transcript gave no text
+    if not full_text.strip():
+        full_text = last_msg_fallback
+
+    if not full_text.strip():
+        return
+
     with open(state["md_path"], "a", encoding="utf-8") as f:
-        f.write(format_assistant_turn(last_msg, tool_summaries))
+        f.write(format_assistant_turn(full_text, tool_summaries))
 
     _write_state(session_id, state)
 
