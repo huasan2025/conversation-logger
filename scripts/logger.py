@@ -237,64 +237,32 @@ def handle_session_start(data: dict) -> None:
     with open(md_path, "w", encoding="utf-8") as f:
         f.write(frontmatter)
 
-    _write_state(session_id, {"md_path": md_path, "logged_assistant_turns": 0})
-
-
-def handle_user_prompt(data: dict) -> None:
-    session_id = data.get("session_id", "unknown")
-    # 实际字段名是 "prompt"，不是 "user_prompt"
-    prompt = data.get("prompt", "")
-
-    if not prompt.strip():
-        return
-
-    state = _read_state(session_id)
-    if not state:
-        return
-
-    title = _make_turn_title(prompt)
-    with open(state["md_path"], "a", encoding="utf-8") as f:
-        f.write(format_user_turn(prompt, title))
+    _write_state(session_id, {"md_path": md_path, "frontmatter": frontmatter})
 
 
 def handle_stop(data: dict) -> None:
     session_id = data.get("session_id", "unknown")
     transcript_path = data.get("transcript_path", "")
-    # last_assistant_message 只包含工具调用之后的最后一段文字，
-    # 若回复中文字在工具调用之前，该字段会遗漏。优先从 transcript 提取全文。
-    last_msg_fallback = data.get("last_assistant_message", "")
 
     state = _read_state(session_id)
     if not state:
         return
-
-    full_text = ""
-    tool_summaries = []
-
-    if transcript_path and os.path.exists(transcript_path):
-        turns = parse_transcript(transcript_path)
-        assistant_turns = [(t, s) for r, t, s in turns if r == "assistant"]
-        logged = state["logged_assistant_turns"]
-        new_turns = assistant_turns[logged:]
-
-        # 拼接所有新增 assistant 轮次的文字（去除空段落）
-        texts = [t for t, _ in new_turns if t.strip()]
-        full_text = "\n\n".join(texts)
-
-        for _, tools in new_turns:
-            tool_summaries.extend(tools)
-
-        state["logged_assistant_turns"] = len(assistant_turns)
-
-    # transcript 无法提供文字时，回退到 last_assistant_message
-    if not full_text.strip():
-        full_text = last_msg_fallback
-
-    if not full_text.strip():
+    if not transcript_path or not os.path.exists(transcript_path):
         return
 
-    with open(state["md_path"], "a", encoding="utf-8") as f:
-        f.write(format_assistant_turn(full_text, tool_summaries))
+    turns = parse_transcript(transcript_path)
+    if not turns:
+        return
+
+    # Rewrite the entire MD on each Stop — eliminates counter drift bugs
+    with open(state["md_path"], "w", encoding="utf-8") as f:
+        f.write(state["frontmatter"])
+        for role, text, tool_summaries in turns:
+            if role == "user":
+                f.write(format_user_turn(text, _make_turn_title(text)))
+            elif role == "assistant":
+                if text.strip() or tool_summaries:
+                    f.write(format_assistant_turn(text, tool_summaries))
 
     _write_state(session_id, state)
 
@@ -358,8 +326,6 @@ def _main() -> None:
 
     if event == "session-start":
         handle_session_start(data)
-    elif event == "user-prompt":
-        handle_user_prompt(data)
     elif event == "stop":
         handle_stop(data)
     else:
